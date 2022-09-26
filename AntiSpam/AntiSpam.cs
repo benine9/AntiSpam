@@ -12,7 +12,7 @@ using TShockAPI.Hooks;
 
 namespace AntiSpam
 {
-	[ApiVersion(1, 17)]
+	[ApiVersion(2, 1)]
 	public class AntiSpam : TerrariaPlugin
 	{
 		Config Config = new Config();
@@ -93,7 +93,7 @@ namespace AntiSpam
 							e.Handled = true;
 							return;
 						case "kick":
-							TShock.Utils.ForceKick(TShock.Players[e.Who], "Spamming", false, true);
+							TShock.Players[e.Who].Kick("Spamming");
 							e.Handled = true;
 							return;
 					}
@@ -151,7 +151,7 @@ namespace AntiSpam
 									e.Handled = true;
 									return;
 								case "kick":
-									TShock.Utils.ForceKick(TShock.Players[e.Player.Index], "Spamming", false, true);
+									TShock.Players[e.Player.Index].Kick("Spamming");
 									e.Handled = true;
 									return;
 							}
@@ -162,24 +162,24 @@ namespace AntiSpam
 		}
 		void OnSendData(SendDataEventArgs e)
 		{
-			if (e.MsgId == PacketTypes.ChatText && !e.Handled)
+			if (e.MsgId == PacketTypes.SmartTextMessage && !e.Handled)
 			{
 				if (Config.DisableBossMessages && e.number2 == 175 && e.number3 == 75 && e.number4 == 255)
 				{
-					if (e.text.StartsWith("Eye of Cthulhu") || e.text.StartsWith("Eater of Worlds") ||
-						e.text.StartsWith("Skeletron") || e.text.StartsWith("King Slime") ||
-						e.text.StartsWith("The Destroyer") || e.text.StartsWith("The Twins") ||
-						e.text.StartsWith("Skeletron Prime") || e.text.StartsWith("Wall of Flesh") ||
-						e.text.StartsWith("Plantera") || e.text.StartsWith("Golem") || e.text.StartsWith("Brain of Cthulhu") ||
-						e.text.StartsWith("Queen Bee") || e.text.StartsWith("Duke Fishron"))
+					if (e.text._text.StartsWith("Eye of Cthulhu") || e.text._text.StartsWith("Eater of Worlds") ||
+						e.text._text.StartsWith("Skeletron") || e.text._text.StartsWith("King Slime") ||
+						e.text._text.StartsWith("The Destroyer") || e.text._text.StartsWith("The Twins") ||
+						e.text._text.StartsWith("Skeletron Prime") || e.text._text.StartsWith("Wall of Flesh") ||
+						e.text._text.StartsWith("Plantera") || e.text._text.StartsWith("Golem") || e.text._text.StartsWith("Brain of Cthulhu") ||
+						e.text._text.StartsWith("Queen Bee") || e.text._text.StartsWith("Duke Fishron"))
 					{
 						e.Handled = true;
 					}
 				}
 				if (Config.DisableOrbMessages && e.number2 == 50 && e.number3 == 255 && e.number4 == 130)
 				{
-					if (e.text == "A horrible chill goes down your spine..." ||
-						e.text == "Screams echo around you...")
+					if (e.text._text == "A horrible chill goes down your spine..." ||
+						e.text._text == "Screams echo around you...")
 					{
 						e.Handled = true;
 					}
