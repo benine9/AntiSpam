@@ -1,10 +1,7 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Text;
 using Terraria;
 using TerrariaApi.Server;
 using TShockAPI;
@@ -12,188 +9,180 @@ using TShockAPI.Hooks;
 
 namespace AntiSpam
 {
-	[ApiVersion(2, 1)]
-	public class AntiSpam : TerrariaPlugin
-	{
-		Config Config = new Config();
-		DateTime[] Times = new DateTime[256];
-		double[] Spams = new double[256];
+    [ApiVersion(2, 1)]
+    public class AntiSpam : TerrariaPlugin
+    {
+        private Config Config = new();
+        private DateTime[] Times = new DateTime[256];
+        private double[] Spams = new double[256];
 
-		public override string Author
-		{
-			get { return "MarioE"; }
-		}
-		public override string Description
-		{
-			get { return "Prevents spamming."; }
-		}
-		public override string Name
-		{
-			get { return "AntiSpam"; }
-		}
-		public override Version Version
-		{
-			get { return Assembly.GetExecutingAssembly().GetName().Version; }
-		}
+        public override string Author => "MarioE";
+        public override string Description => "Prevents spamming.";
+        public override string Name => "AntiSpam";
+        public override Version Version => Assembly.GetExecutingAssembly().GetName().Version;
 
-		public AntiSpam(Main game)
-			: base(game)
-		{
-			Order = 1000000;
-		}
+        public AntiSpam(Main game) : base(game) => Order = 1000000;
 
-		protected override void Dispose(bool disposing)
-		{
-			if (disposing)
-			{
-				ServerApi.Hooks.GameInitialize.Deregister(this, OnInitialize);
-				ServerApi.Hooks.NetSendData.Deregister(this, OnSendData);
-				ServerApi.Hooks.ServerChat.Deregister(this, OnChat);
-				ServerApi.Hooks.ServerLeave.Deregister(this, OnLeave);
-				PlayerHooks.PlayerCommand -= OnPlayerCommand;
-			}
-		}
-		public override void Initialize()
-		{
-			ServerApi.Hooks.GameInitialize.Register(this, OnInitialize);
-			ServerApi.Hooks.NetSendData.Register(this, OnSendData);
-			ServerApi.Hooks.ServerChat.Register(this, OnChat);
-			ServerApi.Hooks.ServerLeave.Register(this, OnLeave);
-			PlayerHooks.PlayerCommand += OnPlayerCommand;
-		}
+        public override void Initialize()
+        {
+            ServerApi.Hooks.GameInitialize.Register(this, OnInitialize);
+            ServerApi.Hooks.NetSendData.Register(this, OnSendData);
+            ServerApi.Hooks.ServerChat.Register(this, OnChat);
+            ServerApi.Hooks.ServerLeave.Register(this, OnLeave);
+            PlayerHooks.PlayerCommand += OnPlayerCommand;
+        }
 
-		void OnChat(ServerChatEventArgs e)
-		{
-			if (!e.Handled)
-			{
-				string text = e.Text;
-				if (e.Text.StartsWith(Commands.Specifier) || e.Text.StartsWith(Commands.SilentSpecifier))
-					return;
-				if ((DateTime.Now - Times[e.Who]).TotalSeconds > Config.Time)
-				{
-					Spams[e.Who] = 0.0;
-					Times[e.Who] = DateTime.Now;
-				}
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                ServerApi.Hooks.GameInitialize.Deregister(this, OnInitialize);
+                ServerApi.Hooks.NetSendData.Deregister(this, OnSendData);
+                ServerApi.Hooks.ServerChat.Deregister(this, OnChat);
+                ServerApi.Hooks.ServerLeave.Deregister(this, OnLeave);
+                PlayerHooks.PlayerCommand -= OnPlayerCommand;
+            }
+            base.Dispose(disposing);
+        }
 
-				if (text.Trim().Length <= Config.ShortLength)
-					Spams[e.Who] += Config.ShortWeight;
-				else if ((double)text.Where(c => Char.IsUpper(c)).Count() / text.Length >= Config.CapsRatio)
-					Spams[e.Who] += Config.CapsWeight;
-				else
-					Spams[e.Who] += Config.NormalWeight;
+        private void OnChat(ServerChatEventArgs e)
+        {
+            if (!e.Handled)
+            {
+                string text = e.Text;
+                if (IsCommandPrefix(text))
+                    return;
 
-				if (Spams[e.Who] > Config.Threshold && !TShock.Players[e.Who].Group.HasPermission("antispam.ignore"))
-				{
-					switch (Config.Action.ToLower())
-					{
-						case "ignore":
-						default:
-							Times[e.Who] = DateTime.Now;
-							TShock.Players[e.Who].SendErrorMessage("You have been ignored for spamming.");
-							e.Handled = true;
-							return;
-						case "kick":
-							TShock.Players[e.Who].Kick("Spamming");
-							e.Handled = true;
-							return;
-					}
-				}
-			}
-		}
-		void OnInitialize(EventArgs e)
-		{
-			Commands.ChatCommands.Add(new Command("antispam.reload", Reload, "asreload"));
+                int playerIndex = e.Who;
+                UpdateSpamMetrics(playerIndex);
+                double spamScore = CalculateSpamScore(text);
 
-			string path = Path.Combine(TShock.SavePath, "antispamconfig.json");
-			if (File.Exists(path))
-				Config = Config.Read(path);
-			Config.Write(path);
-		}
-		void OnLeave(LeaveEventArgs e)
-		{
-			Spams[e.Who] = 0.0;
-			Times[e.Who] = DateTime.Now;
-		}
-		void OnPlayerCommand(PlayerCommandEventArgs e)
-		{
-			if (!e.Handled && e.Player.RealPlayer)
-			{
-				switch (e.CommandName)
-				{
-					case "me":
-					case "r":
-					case "reply":
-					case "tell":
-					case "w":
-					case "whisper":
-						if ((DateTime.Now - Times[e.Player.Index]).TotalSeconds > Config.Time)
-						{
-							Spams[e.Player.Index] = 0.0;
-							Times[e.Player.Index] = DateTime.Now;
-						}
+                if (spamScore > Config.Threshold && !CanBypassSpam(playerIndex))
+                {
+                    HandleSpamAction(playerIndex);
+                    e.Handled = true;
+                }
+            }
+        }
 
-						string text = e.CommandText.Substring(e.CommandName.Length);
-						if ((double)text.Where(c => Char.IsUpper(c)).Count() / text.Length >= Config.CapsRatio)
-							Spams[e.Player.Index] += Config.CapsWeight;
-						else if (text.Trim().Length <= Config.ShortLength)
-							Spams[e.Player.Index] += Config.ShortWeight;
-						else
-							Spams[e.Player.Index] += Config.NormalWeight;
+        private void OnPlayerCommand(PlayerCommandEventArgs e)
+        {
+            if (!e.Handled && e.Player.RealPlayer)
+            {
+                string commandName = e.CommandName.ToLower();
+                int playerIndex = e.Player.Index;
 
-						if (Spams[e.Player.Index] > Config.Threshold && !TShock.Players[e.Player.Index].Group.HasPermission("antispam.ignore"))
-						{
-							switch (Config.Action.ToLower())
-							{
-								case "ignore":
-								default:
-									Times[e.Player.Index] = DateTime.Now;
-									TShock.Players[e.Player.Index].SendErrorMessage("You have been ignored for spamming.");
-									e.Handled = true;
-									return;
-								case "kick":
-									TShock.Players[e.Player.Index].Kick("Spamming");
-									e.Handled = true;
-									return;
-							}
-						}
-						return;
-				}
-			}
-		}
-		void OnSendData(SendDataEventArgs e)
-		{
-			if (e.MsgId == PacketTypes.SmartTextMessage && !e.Handled)
-			{
-				if (Config.DisableBossMessages && e.number2 == 175 && e.number3 == 75 && e.number4 == 255)
-				{
-					if (e.text._text.StartsWith("Eye of Cthulhu") || e.text._text.StartsWith("Eater of Worlds") ||
-						e.text._text.StartsWith("Skeletron") || e.text._text.StartsWith("King Slime") ||
-						e.text._text.StartsWith("The Destroyer") || e.text._text.StartsWith("The Twins") ||
-						e.text._text.StartsWith("Skeletron Prime") || e.text._text.StartsWith("Wall of Flesh") ||
-						e.text._text.StartsWith("Plantera") || e.text._text.StartsWith("Golem") || e.text._text.StartsWith("Brain of Cthulhu") ||
-						e.text._text.StartsWith("Queen Bee") || e.text._text.StartsWith("Duke Fishron"))
-					{
-						e.Handled = true;
-					}
-				}
-				if (Config.DisableOrbMessages && e.number2 == 50 && e.number3 == 255 && e.number4 == 130)
-				{
-					if (e.text._text == "A horrible chill goes down your spine..." ||
-						e.text._text == "Screams echo around you...")
-					{
-						e.Handled = true;
-					}
-				}
-			}
-		}
+                if (IsCommandWhisper(commandName))
+                {
+                    string text = e.CommandText.Substring(e.CommandName.Length);
+                    UpdateSpamMetrics(playerIndex);
+                    double spamScore = CalculateSpamScore(text);
 
-		void Reload(CommandArgs e)
-		{
-			string path = Path.Combine(TShock.SavePath, "antispamconfig.json");
-			if (File.Exists(path))
-				Config = Config.Read(path);
-			Config.Write(path);
-			e.Player.SendSuccessMessage("Reloaded antispam config.");
-		}
-	}
+                    if (spamScore > Config.Threshold && !CanBypassSpam(playerIndex))
+                    {
+                        HandleSpamAction(playerIndex);
+                        e.Handled = true;
+                    }
+                }
+            }
+        }
+
+        private void OnInitialize(EventArgs e)
+        {
+            Commands.ChatCommands.Add(new Command("antispam.reload", Reload, "asreload"));
+
+            string configPath = Path.Combine(TShock.SavePath, "antispamconfig.json");
+            if (File.Exists(configPath))
+                Config = Config.Read(configPath);
+            Config.Write(configPath);
+        }
+
+        private void OnLeave(LeaveEventArgs e) => ResetSpamMetrics(e.Who);
+
+        private void OnSendData(SendDataEventArgs e)
+        {
+            if (ShouldBlockBossMessages(e) || ShouldBlockOrbMessages(e))
+                e.Handled = true;
+        }
+
+        private void Reload(CommandArgs e)
+        {
+            string configPath = Path.Combine(TShock.SavePath, "antispamconfig.json");
+            if (File.Exists(configPath))
+                Config = Config.Read(configPath);
+            Config.Write(configPath);
+            e.Player.SendSuccessMessage("Reloaded antispam config.");
+        }
+
+        private bool IsCommandPrefix(string text) => text.StartsWith(Commands.Specifier) || text.StartsWith(Commands.SilentSpecifier);
+
+        private bool IsCommandWhisper(string commandName)
+        {
+            string[] whisperCommands = { "me", "r", "reply", "tell", "w", "whisper" };
+            return whisperCommands.Contains(commandName);
+        }
+
+        private void UpdateSpamMetrics(int playerIndex)
+        {
+            if ((DateTime.Now - Times[playerIndex]).TotalSeconds > Config.Time)
+            {
+                Spams[playerIndex] = 0.0;
+                Times[playerIndex] = DateTime.Now;
+            }
+        }
+
+        private double CalculateSpamScore(string text)
+        {
+            if (text.Trim().Length <= Config.ShortLength)
+                return Spams[0] + Config.ShortWeight;
+            double capsRatio = (double)text.Count(c => char.IsUpper(c)) / text.Length;
+            if (capsRatio >= Config.CapsRatio)
+                return Spams[0] + Config.CapsWeight;
+            return Spams[0] + Config.NormalWeight;
+        }
+
+        public static bool CanBypassSpam(int playerIndex) => TShock.Players[playerIndex].Group.HasPermission("antispam.ignore");
+
+        private void HandleSpamAction(int playerIndex)
+        {
+            switch (Config.Action.ToLower())
+            {
+                case "ignore":
+                default:
+                    Times[playerIndex] = DateTime.Now;
+                    TShock.Players[playerIndex].SendErrorMessage("You have been ignored for spamming.");
+                    break;
+                case "kick":
+                    TShock.Players[playerIndex].Kick("Spamming");
+                    break;
+            }
+        }
+
+        private bool ShouldBlockBossMessages(SendDataEventArgs e)
+        {
+            if (Config.DisableBossMessages && e.MsgId == PacketTypes.SmartTextMessage && e.number2 == 175 && e.number3 == 75 && e.number4 == 255)
+            {
+                string text = e.text._text;
+                string[] bossNames = { "Eye of Cthulhu", "Eater of Worlds", "Skeletron", "King Slime", "The Destroyer", "The Twins", "Skeletron Prime", "Wall of Flesh", "Plantera", "Golem", "Brain of Cthulhu", "Queen Bee", "Duke Fishron" };
+                return bossNames.Any(boss => text.StartsWith(boss));
+            }
+            return false;
+        }
+
+        private bool ShouldBlockOrbMessages(SendDataEventArgs e)
+        {
+            if (Config.DisableOrbMessages && e.MsgId == PacketTypes.SmartTextMessage && e.number2 == 50 && e.number3 == 255 && e.number4 == 130)
+            {
+                string text = e.text._text;
+                return text == "A horrible chill goes down your spine..." || text == "Screams echo around you...";
+            }
+            return false;
+        }
+
+        private void ResetSpamMetrics(int playerIndex)
+        {
+            Spams[playerIndex] = 0.0;
+            Times[playerIndex] = DateTime.Now;
+        }
+    }
 }
