@@ -21,7 +21,7 @@ namespace AntiSpam
         public override string Name => "AntiSpam";
         public override Version Version => Assembly.GetExecutingAssembly().GetName().Version;
 
-        public AntiSpam(Main game) : base(game) => Order = 1000000;
+        public AntiSpam(Main game) : base(game) => Order = -5;
 
         public override void Initialize()
         {
